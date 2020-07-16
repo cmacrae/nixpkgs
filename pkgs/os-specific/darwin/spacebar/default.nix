@@ -2,13 +2,13 @@
 
 stdenv.mkDerivation rec {
   pname = "spacebar";
-  version = "0.5.0";
+  version = "1.0.0";
 
   src = fetchFromGitHub {
     owner = "somdoron";
     repo = pname;
     rev = "v${version}";
-    sha256 = "0v8v4xsc67qpzm859r93ggq7rr7hmaj6dahdlg6g3ppj81cq0khz";
+    sha256 = "12xrj71f1cgc4m5qaj9ffg4lzfw6sf3i9wcwavy4b74i2zwqmvmx";
   };
 
   buildInputs = [ Carbon Cocoa ScriptingBridge ];
