@@ -125,6 +125,14 @@ in
       };
     };
 
+    cri = {
+      runtime = mkOption {
+        description = "Kubernetes container runtime to use.";
+        type = enum [ "docker" "cri-o" ];
+        default = "docker";
+      };
+    };
+
     enable = mkEnableOption "Kubernetes kubelet.";
 
     extraOpts = mkOption {
@@ -240,22 +248,30 @@ in
       systemd.services.kubelet = {
         description = "Kubernetes Kubelet Service";
         wantedBy = [ "kubernetes.target" ];
-        after = [ "network.target" "docker.service" "kube-apiserver.service" ];
+        after = [ "${cfg.cri.runtime}.target" "network.target" "kube-apiserver.service" ];
         path = with pkgs; [
+          conntrack-tools
           gitMinimal
           openssh
-          docker
           util-linux
           iproute
           ethtool
           thin-provisioning-tools
           iptables
           socat
-        ] ++ lib.optional config.boot.zfs.enabled config.boot.zfs.package ++ top.path;
+        ]
+        ++ optional config.boot.zfs.enabled config.boot.zfs.package
+        ++ (if cfg.cri.runtime == "docker" then [ config.virtualisation.docker.package ]
+           else if cfg.cri.runtime == "cri-o" then [ config.virtualisation.cri-o.package pkgs.podman ]
+           else throw "Unhandled runtime: ${cfg.cri.runtime}")
+        ++ top.path;
+
         preStart = ''
           ${concatMapStrings (img: ''
             echo "Seeding docker image: ${img}"
-            docker load <${img}
+            ${if (cfg.cri.runtime == "docker") then "docker load <"
+              else if cfg.cri.runtime == "cri-o" then "podman load -i "
+              else throw "Unhandled runtime: ${cfg.cri.runtime}"}${img}
           '') cfg.seedDockerImages}
 
           rm /opt/cni/bin/* || true
@@ -270,6 +286,8 @@ in
           MemoryAccounting = true;
           Restart = "on-failure";
           RestartSec = "1000ms";
+          # TODO: Move options to a config file
+          #       https://kubernetes.io/docs/tasks/administer-cluster/kubelet-config-file
           ExecStart = ''${top.package}/bin/kubelet \
             --address=${cfg.address} \
             --authentication-token-webhook \
@@ -306,6 +324,9 @@ in
             ${optionalString (cfg.tlsKeyFile != null)
               "--tls-private-key-file=${cfg.tlsKeyFile}"} \
             ${optionalString (cfg.verbosity != null) "--v=${toString cfg.verbosity}"} \
+            ${optionalString (cfg.cri.runtime == "cri-o")
+              ''--container-runtime=remote \
+                --container-runtime-endpoint=unix:///var/run/crio/crio.sock''} \
             ${cfg.extraOpts}
           '';
           WorkingDirectory = top.dataDir;
